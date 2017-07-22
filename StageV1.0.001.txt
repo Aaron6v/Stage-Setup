@@ -1,0 +1,63 @@
+#############################################################################
+# CenterEdge Software Support Stage Setup                                   #
+# Written By: Aaron Adams(A2)                                               #
+# Date Completed: Saturday July 22, 2017                                    #
+#############################################################################
+
+
+Set-Location Cert:/Localmachine/My
+$Certificate = Get-ChildItem
+$CertificateName = Read-Host -Prompt 'Enter Site Certificate Name'
+$cert = $Certificate | Where {$_.Subject.Contains($CertificateName)} | Select-Object -First 1
+If ($cert -eq $null) {
+    write-host "Certificate $CertificateName Not Found"
+} ElseIf ($cert.NotAfter -lt [DateTime]::Now) {
+    Write-host "Certificate $CertificateName Expired"
+    cd C:\PFSCommon
+    Start-Process advcertinstall.exe
+    pause
+} Else {
+    Write-Host "Certificate Found! Starting Stage Cert Config"
+    cd C:/CenterEdge/Install
+    ./StageCertConfig.ps1 $CertificateName   
+}
+function Invoke-SqlCommand() {
+    [cmdletbinding(DefaultParameterSetName="integrated")]Param (
+        [Parameter(Mandatory=$true)][Alias("Serverinstance")][string]$Server,
+        [Parameter(Mandatory=$true)][string]$Database,
+        [Parameter(Mandatory=$true, ParameterSetName="not_integrated")][string]$Username,
+        [Parameter(Mandatory=$true, ParameterSetName="not_integrated")][string]$Password,
+        [Parameter(Mandatory=$false, ParameterSetName="integrated")][switch]$UseWindowsAuthentication = $true,
+        [Parameter(Mandatory=$true)][string]$Query,
+        [Parameter(Mandatory=$false)][int]$CommandTimeout=0
+    )
+    
+    $connstring = "Server=$Server; Database=$Database; "
+    If ($PSCmdlet.ParameterSetName -eq "not_integrated") { $connstring += "User ID=$username; Password=$password;" }
+    ElseIf ($PSCmdlet.ParameterSetName -eq "integrated") { $connstring += "Trusted_Connection=Yes; Integrated Security=SSPI;" }
+    
+    $connection = New-Object System.Data.SqlClient.SqlConnection($connstring)
+    $connection.Open()
+    
+    $command = $connection.CreateCommand()
+    $command.CommandText = $Query
+    $command.CommandTimeout = $CommandTimeout
+    
+    $adapter = New-Object System.Data.SqlClient.SqlDataAdapter $command
+    $dataset = New-Object System.Data.DataSet
+    $adapter.Fill($dataset) | out-null
+    
+    If ($dataset.Tables[0] -ne $null) {$table = $dataset.Tables[0]}
+    ElseIf ($table.Rows.Count -eq 0) { $table = New-Object System.Collections.ArrayList }
+    
+    $connection.Close()
+    return $table
+}
+$server = "localhost"
+$db = "CenterEdge"
+$sql = "TRUNCATE TABLE WebCloudUpdates"
+$Insert = "insert into weboptions(keyno, optionname, optionvalue, typename) Values('1','CloudSyncCorpOnly','False', 'system.boolean')"
+Invoke-SqlCommand -Server $server -Database $db -Query $sql | Format-Table
+Invoke-Sqlcommand -Server $server -Database $db -Query $Insert | Format-Table
+Start-Sleep 2
+Clear
